@@ -28,9 +28,10 @@ async function handleRequest(req, env, deployPlatform, clientIp, ctx) {
   const url = new URL(req.url);
   let path = url.pathname;
   const method = req.method;
+  const isPossibleFongmiRootEntry = isPossibleFongmiRootRequest(path, method, url, globals);
 
   //  Bangumi Data 辅助函数，用于判断数据更新
-  const isDataDependentRequest = path.includes('/search') || path.includes('/match') || path.includes('/danmaku');
+  const isDataDependentRequest = path.includes('/search') || path.includes('/match') || path.includes('/danmaku') || isPossibleFongmiRootEntry;
 
   if (globals.useBangumiData) {
       await initBangumiData(deployPlatform, isDataDependentRequest, ctx);
@@ -180,7 +181,7 @@ async function handleRequest(req, env, deployPlatform, clientIp, ctx) {
   }
 
   // GET /
-  if (path === "/" && method === "GET") {
+  if (path === "/" && method === "GET" && !isFongmiRootRequest(path, method, url, globals)) {
     return handleUI();
   }
 
@@ -239,6 +240,12 @@ async function handleRequest(req, env, deployPlatform, clientIp, ctx) {
   if (path.endsWith("/danmaku/api/v2/fongmi/danmaku")) {
     log("info", `[Path Fix] Collapsed nested danmaku path: "${path}" -> "/danmaku"`);
     path = "/danmaku";
+  }
+
+  // 兼容 FongMi 只填写部署根地址的写法：
+  // GET /TOKEN?name=...&episode=... 或 POST /TOKEN
+  if (isFongmiRootRequest(path, method, url, globals)) {
+    return getFongmiDanmaku(url, req);
   }
 
   // GET /api/config - 获取配置信息 (需要 token)
@@ -303,7 +310,7 @@ async function handleRequest(req, env, deployPlatform, clientIp, ctx) {
   }
 
   // GET /
-  if (path === "/" && method === "GET") {
+  if (path === "/" && method === "GET" && !isFongmiRootRequest(path, method, url, globals)) {
     return handleUI();
   }
 
@@ -570,6 +577,23 @@ function matchIpBlacklistRule(rule, clientIp) {
   }
 
   return false;
+}
+
+function hasFongmiRootQuery(url) {
+  return url.searchParams.has("name");
+}
+
+function isFongmiRootRequest(path, method, url, config = {}) {
+  if (path !== "/") return false;
+  if (method === "POST") return config.currentToken === config.token;
+  return method === "GET" && hasFongmiRootQuery(url);
+}
+
+function isPossibleFongmiRootRequest(path, method, url, config = {}) {
+  const parts = path.split("/").filter(Boolean);
+  if (parts.length > 1) return false;
+  if (method === "POST") return parts[0] === config.token;
+  return method === "GET" && hasFongmiRootQuery(url);
 }
 
 function isIpInCidr(ip, cidrIp, prefix) {
